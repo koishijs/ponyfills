@@ -1,0 +1,15 @@
+root: true
+
+env:
+  browser: true
+  mocha: true
+  es2020: true
+
+globals:
+  NodeJS: true
+
+extends:
+  - '@koishijs/eslint-config'
+
+plugins:
+  - mocha
