@@ -1,0 +1,34 @@
+{
+  "name": "@koishijs/fs",
+  "version": "1.3.0",
+  "description": "A browserify-compatible fs module using the HTML5 Filesystem API",
+  "exports": {
+    ".": "./lib/index.js",
+    "./constants": "./lib/constants/index.js",
+    "./promises": "./lib/promises/index.js",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/koishijs/ponyfills.git",
+    "directory": "packages/fs"
+  },
+  "bugs": {
+    "url": "https://github.com/koishijs/ponyfills/issues"
+  },
+  "homepage": "https://github.com/koishijs/ponyfills",
+  "author": "Shigma <shigma10826@gmail.com>",
+  "keywords": [
+    "fs",
+    "filesystem",
+    "browserify",
+    "ponyfill",
+    "polyfill",
+    "node"
+  ]
+}
