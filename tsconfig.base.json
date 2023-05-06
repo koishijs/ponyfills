@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "strict": true,
-    "target": "es2020",
-    "module": "commonjs",
+    "target": "esnext",
+    "module": "esnext",
     "declaration": true,
     "composite": true,
     "incremental": true,

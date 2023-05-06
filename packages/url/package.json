@@ -1,6 +1,6 @@
 {
   "name": "@koishijs/url",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Node.js url module ponyfill for browser",
   "exports": {
     ".": "./lib/index.js",
