@@ -36,6 +36,19 @@ declare global {
   }
 }
 
+interface SystemErrorOptions {
+  errno: number
+  code: string
+  syscall: string
+  path: string
+}
+
+class SystemError extends Error {
+  constructor(message: string, options: SystemErrorOptions) {
+    super(`${options.code}: ${message}, ${options.syscall} '${options.path}'`)
+  }
+}
+
 export async function writeFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
@@ -88,10 +101,26 @@ export interface MakeDirectoryOptions {
 export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
-  for (let i = 0; i < segments.length - 1; ++i) {
-    const shouldCreate = options.recursive || i === segments.length - 1
-    root = await root.getDirectoryHandle(segments[i], shouldCreate ? { create: true } : {})
+  const filename = segments.pop()!
+  for (let i = 0; i < segments.length; ++i) {
+    root = await root.getDirectoryHandle(segments[i], options.recursive ? { create: true } : {})
   }
+  if (options.recursive) {
+    return await root.getDirectoryHandle(filename, { create: true })
+  }
+  try {
+    await root.getDirectoryHandle(filename)
+  } catch {
+    await root.getDirectoryHandle(filename, { create: true })
+    return path
+  }
+  if (options.recursive) return
+  throw new SystemError('file already exists', {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path,
+  })
 }
 
 export async function unlink(path: string) {
