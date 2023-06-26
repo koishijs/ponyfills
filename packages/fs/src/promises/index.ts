@@ -85,11 +85,12 @@ export interface MakeDirectoryOptions {
   recursive?: boolean
 }
 
-export async function mkdir(path: string, options?: MakeDirectoryOptions) {
+export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment, { create: true })
+  for (let i = 0; i < segments.length - 1; ++i) {
+    const shouldCreate = options.recursive || i === segments.length - 1
+    root = await root.getDirectoryHandle(segments[i], shouldCreate ? { create: true } : {})
   }
 }
 
@@ -105,20 +106,26 @@ export async function unlink(path: string) {
 
 export interface StatOptions {}
 
-export async function getHandle(path: string) {
-  let handle: FileSystemHandle
+export async function getHandle(path: string, kind: 'file'): Promise<FileSystemFileHandle>
+export async function getHandle(path: string, kind: 'directory'): Promise<FileSystemDirectoryHandle>
+export async function getHandle(path: string, kind?: FileSystemHandleKind): Promise<FileSystemHandle>
+export async function getHandle(path: string, kind?: FileSystemHandleKind) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
   const filename = segments.pop()!
   for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment)
+    root = await root.getDirectoryHandle(segment, { create: !!kind })
+  }
+  if (kind === 'file') {
+    return await root.getFileHandle(filename, { create: true })
+  } else if (kind === 'directory') {
+    return await root.getDirectoryHandle(filename, { create: true })
   }
   try {
-    handle = await root.getFileHandle(filename)
+    return await root.getFileHandle(filename)
   } catch {
-    handle = await root.getDirectoryHandle(filename)
+    return await root.getDirectoryHandle(filename)
   }
-  return handle
 }
 
 export async function stat(path: string, options?: StatOptions) {
@@ -131,4 +138,20 @@ export async function stat(path: string, options?: StatOptions) {
 
 export async function access(path: string, mode?: number) {
   await getHandle(path)
+}
+
+export async function rename(oldPath: string, newPath: string) {
+  const oldHandle = await getHandle(oldPath)
+  const newHandle = await getHandle(newPath, oldHandle.kind)
+  if (oldHandle.kind === 'file') {
+    const buffer = await (oldHandle as FileSystemFileHandle).getFile().then(file => file.arrayBuffer())
+    const stream = await (newHandle as FileSystemFileHandle).createWritable()
+    await stream.write(buffer)
+    await stream.close()
+  } else {
+    for await (const name of (oldHandle as FileSystemDirectoryHandle).keys()) {
+      await rename(oldPath + '/' + name, newPath + '/' + name)
+    }
+  }
+  await unlink(oldPath)
 }
