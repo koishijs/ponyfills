@@ -4,8 +4,8 @@
   "description": "Node.js fs module ponyfill for browser",
   "exports": {
     ".": "./lib/index.js",
-    "./constants": "./lib/constants/index.js",
-    "./promises": "./lib/promises/index.js",
+    "./constants": "./lib/constants.js",
+    "./promises": "./lib/promises.js",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

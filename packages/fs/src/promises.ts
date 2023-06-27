@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer'
-import { O_APPEND, O_EXCL, parseFlags } from '../constants'
+import { O_APPEND, O_EXCL, parseFlags } from './constants'
+import { Dirent } from '.'
 
 declare global {
   interface FileSystemCreateWritableOptions {
@@ -61,6 +62,10 @@ class EEXIST extends SystemError {
   }
 }
 
+export interface EncodingOptions {
+  encoding?: BufferEncoding
+}
+
 export async function writeFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
@@ -93,15 +98,21 @@ export async function readFile(path: string, options: 'utf8' | 'binary' = 'binar
   }
 }
 
-export async function readdir(path: string) {
+export interface ReadDirectoryOptions {
+  withFileTypes?: boolean
+}
+
+export async function readdir(path: string, options: ReadDirectoryOptions & { withFileTypes: true }): Promise<Dirent[]>
+export async function readdir(path: string, options?: ReadDirectoryOptions & { withFileTypes?: false }): Promise<string[]>
+export async function readdir(path: string, options: ReadDirectoryOptions = {}) {
   let root = await navigator.storage.getDirectory()
   const segments = path.split('/').filter(Boolean)
   for (const segment of segments) {
     root = await root.getDirectoryHandle(segment)
   }
-  const results: string[] = []
-  for await (const name of root.keys()) {
-    results.push(name)
+  const results: (string | Dirent)[] = []
+  for await (const [name, handle] of root.entries()) {
+    results.push(options.withFileTypes ? new Dirent(handle) : name)
   }
   return results
 }
