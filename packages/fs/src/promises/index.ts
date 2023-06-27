@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer'
+import { O_APPEND, O_EXCL, parseFlags } from '../constants'
 
 declare global {
   interface FileSystemCreateWritableOptions {
@@ -46,6 +47,17 @@ interface SystemErrorOptions {
 class SystemError extends Error {
   constructor(message: string, options: SystemErrorOptions) {
     super(`${options.code}: ${message}, ${options.syscall} '${options.path}'`)
+  }
+}
+
+class EEXIST extends SystemError {
+  constructor(syscall: string, path: string) {
+    super('file already exists', {
+      errno: -17,
+      code: 'EEXIST',
+      syscall,
+      path,
+    })
   }
 }
 
@@ -114,13 +126,7 @@ export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
     await root.getDirectoryHandle(filename, { create: true })
     return path
   }
-  if (options.recursive) return
-  throw new SystemError('file already exists', {
-    errno: -17,
-    code: 'EEXIST',
-    syscall: 'mkdir',
-    path,
-  })
+  throw new EEXIST('mkdir', path)
 }
 
 export async function unlink(path: string) {
@@ -132,6 +138,8 @@ export async function unlink(path: string) {
   }
   await root.removeEntry(filename, { recursive: true })
 }
+
+export { unlink as rm }
 
 export interface StatOptions {}
 
@@ -183,4 +191,59 @@ export async function rename(oldPath: string, newPath: string) {
     }
   }
   await unlink(oldPath)
+}
+
+interface FileHandleWriteResult<T> {
+  bytesWritten: number
+  buffer: T
+}
+
+class FileHandle {
+  private _streamTask?: Promise<FileSystemWritableFileStream>
+
+  constructor(private handle: FileSystemFileHandle, private flags: number) {}
+
+  stream() {
+    return this._streamTask ||= this.handle.createWritable({
+      keepExistingData: !!(this.flags & O_APPEND),
+    })
+  }
+
+  async readFile() {
+    const file = await this.handle.getFile()
+    return await file.arrayBuffer()
+  }
+
+  write<T extends Uint8Array>(buffer: T, offset?: number, length?: number, position?: number): Promise<FileHandleWriteResult<T>>
+  write(data: string, position?: number, encoding?: BufferEncoding): Promise<FileHandleWriteResult<string>>
+  async write(data: string | Uint8Array, ...args: any[]) {
+    if (typeof data === 'string') {
+      const result = await this.write(new TextEncoder().encode(data), undefined, undefined, args[1])
+      return { ...result, buffer: data }
+    }
+    const offset = args[0] ?? 0
+    const length = args[1] ?? data.byteLength - offset
+    data = data.slice(offset, offset + length)
+    const stream = await this.stream()
+    await stream.write(data)
+    return { bytesWritten: data.byteLength, buffer: data }
+  }
+
+  async close() {
+    const stream = await this.stream()
+    await stream.close()
+  }
+}
+
+export async function open(path: string, flags: string | number, mode?: number) {
+  flags = parseFlags(flags)
+  if (flags & O_EXCL) {
+    try {
+      await getHandle(path)
+    } catch {
+      return new FileHandle(await getHandle(path, 'file'), flags)
+    }
+    throw new EEXIST('open', path)
+  }
+  return new FileHandle(await getHandle(path, 'file'), flags)
 }

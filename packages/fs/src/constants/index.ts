@@ -53,3 +53,19 @@ export const UV_FS_COPYFILE_FICLONE = 2
 export const COPYFILE_FICLONE = 2
 export const UV_FS_COPYFILE_FICLONE_FORCE = 4
 export const COPYFILE_FICLONE_FORCE = 4
+
+export function parseFlags(flags: string | number) {
+  if (typeof flags === 'number') return flags
+  let result = 0
+  for (const flag of flags) {
+    switch (flag) {
+      case 'r': break
+      case 'w': break
+      case 'a': result |= O_APPEND; break
+      case 'x': result |= O_EXCL; break
+      case '+': break
+      default: throw new Error(`invalid flags: ${flags}`)
+    }
+  }
+  return result
+}
