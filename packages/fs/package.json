@@ -30,5 +30,8 @@
     "ponyfill",
     "polyfill",
     "node"
-  ]
+  ],
+  "dependencies": {
+    "anymatch": "^3.1.3"
+  }
 }
