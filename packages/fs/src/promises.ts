@@ -84,34 +84,62 @@ class ENOTDIR extends SystemError {
   }
 }
 
-async function getParent(path: string, create = false) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (const segment of segments) {
-    try {
-      root = await root.getDirectoryHandle(segment, { create })
-    } catch (e) {
-      if (!(e instanceof DOMException)) throw e
-      if (e.code === DOMException.TYPE_MISMATCH_ERR) {
-        throw new ENOTDIR('lstat', path)
-      } else if (e.code === DOMException.NOT_FOUND_ERR) {
-        throw new ENOENT('lstat', path)
-      }
-      throw e
-    }
+class EISDIR extends SystemError {
+  constructor(syscall: string, path: string) {
+    super('illegal operation on a directory', {
+      errno: -21,
+      code: 'EISDIR',
+      syscall,
+      path,
+    })
   }
-  return [root, filename] as const
+}
+
+async function syscall<T>(type: string, path: string, cb: () => Promise<T>, dict: Record<number, new (syscall: string, path: string) => SystemError>) {
+  try {
+    return await cb()
+  } catch (e) {
+    if (!(e instanceof DOMException)) throw e
+    const constructor = dict[e.code]
+    if (!constructor) throw e
+    throw new constructor(type, path)
+  }
+}
+
+async function getDirectoryHandle(type: string, path: string, parts: string[], create: boolean) {
+  let root = await navigator.storage.getDirectory()
+  for (const part of parts) {
+    await syscall(type, path, async () => {
+      root = await root.getDirectoryHandle(part, { create })
+    }, {
+      [DOMException.TYPE_MISMATCH_ERR]: ENOTDIR,
+      [DOMException.NOT_FOUND_ERR]: ENOENT,
+    })
+  }
+  return root
+}
+
+async function getParent(type: string, path: string, create = false) {
+  const parts = path.split('/').filter(Boolean)
+  const filename = parts.pop()!
+  return [await getDirectoryHandle(type, path, parts, create), filename] as const
 }
 
 export interface EncodingOptions {
   encoding?: BufferEncoding
 }
 
-export async function writeFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
-  const [root, filename] = await getParent(path, true)
-  const handle = await root.getFileHandle(filename, { create: true })
-  const stream = await handle.createWritable()
+async function getFileHandle(type: string, path: string, create = false) {
+  const [root, filename] = await getParent(type, path)
+  return syscall(type, path, () => root.getFileHandle(filename, { create }), {
+    [DOMException.TYPE_MISMATCH_ERR]: EISDIR,
+    [DOMException.NOT_FOUND_ERR]: ENOENT,
+  })
+}
+
+async function writeOrAppendFile(type: string, path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView, keepExistingData: boolean) {
+  const handle = await getFileHandle(type, path, true)
+  const stream = await handle.createWritable({ keepExistingData })
   if (typeof data === 'string') {
     data = new TextEncoder().encode(data)
   }
@@ -119,9 +147,16 @@ export async function writeFile(path: string, data: string | ArrayBuffer | Array
   await stream.close()
 }
 
+export async function writeFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
+  await writeOrAppendFile('write', path, data, false)
+}
+
+export async function appendFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
+  await writeOrAppendFile('append', path, data, true)
+}
+
 export async function readFile(path: string, options: 'utf8' | 'binary' = 'binary') {
-  const [root, filename] = await getParent(path, true)
-  const handle = await root.getFileHandle(filename)
+  const handle = await getFileHandle('read', path)
   const file = await handle.getFile()
   if (options === 'utf8') {
     return await file.text()
@@ -137,11 +172,8 @@ export interface ReadDirectoryOptions {
 export async function readdir(path: string, options: ReadDirectoryOptions & { withFileTypes: true }): Promise<Dirent[]>
 export async function readdir(path: string, options?: ReadDirectoryOptions & { withFileTypes?: false }): Promise<string[]>
 export async function readdir(path: string, options: ReadDirectoryOptions = {}) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment)
-  }
+  const parts = path.split('/').filter(Boolean)
+  const root = await getDirectoryHandle('readdir', path, parts, false)
   const results: (string | Dirent)[] = []
   for await (const [name, handle] of root.entries()) {
     results.push(options.withFileTypes ? new Dirent(handle) : name)
@@ -154,15 +186,22 @@ export interface MakeDirectoryOptions {
 }
 
 export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
-  const [root, filename] = await getParent(path, options.recursive)
   if (options.recursive) {
-    return await root.getDirectoryHandle(filename, { create: true })
+    await getDirectoryHandle('mkdir', path, path.split('/').filter(Boolean), true)
+    return
   }
+  const [root, filename] = await getParent('mkdir', path)
   try {
     await root.getDirectoryHandle(filename)
-  } catch {
-    await root.getDirectoryHandle(filename, { create: true })
-    return path
+  } catch (e) {
+    if (!(e instanceof DOMException)) throw e
+    if (e.code === DOMException.NOT_FOUND_ERR) {
+      await root.getDirectoryHandle(filename, { create: true })
+      return
+    } else if (e.code === DOMException.TYPE_MISMATCH_ERR) {
+      throw new EEXIST('mkdir', path)
+    }
+    throw e
   }
   throw new EEXIST('mkdir', path)
 }
@@ -174,11 +213,11 @@ export interface RemoveOptions {
 
 export async function rm(path: string, options: RemoveOptions = {}) {
   try {
-    const [root, filename] = await getParent(path)
+    const [root, filename] = await getParent('rm', path)
     await root.removeEntry(filename, { recursive: options.recursive })
-  } catch (err) {
-    if (options.force && err instanceof ENOENT) return
-    throw err
+  } catch (e) {
+    if (options.force && e instanceof ENOENT) return
+    throw e
   }
 }
 
@@ -215,7 +254,7 @@ export async function getHandle(path: string, kind: 'file'): Promise<FileSystemF
 export async function getHandle(path: string, kind: 'directory'): Promise<FileSystemDirectoryHandle>
 export async function getHandle(path: string, kind?: FileSystemHandleKind): Promise<FileSystemHandle>
 export async function getHandle(path: string, kind?: FileSystemHandleKind) {
-  const [root, filename] = await getParent(path, !!kind)
+  const [root, filename] = await getParent('lstat', path, !!kind)
   if (kind === 'file') {
     return await root.getFileHandle(filename, { create: true })
   } else if (kind === 'directory') {

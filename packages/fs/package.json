@@ -1,6 +1,6 @@
 {
   "name": "@koishijs/fs",
-  "version": "1.3.4",
+  "version": "1.3.7",
   "description": "Node.js fs module ponyfill for browser",
   "exports": {
     ".": "./lib/index.js",
