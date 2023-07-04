@@ -51,6 +51,17 @@ class SystemError extends Error {
   }
 }
 
+class ENOENT extends SystemError {
+  constructor(syscall: string, path: string) {
+    super('no such file or directory', {
+      errno: -2,
+      code: 'EEXIST',
+      syscall,
+      path,
+    })
+  }
+}
+
 class EEXIST extends SystemError {
   constructor(syscall: string, path: string) {
     super('file already exists', {
@@ -62,17 +73,43 @@ class EEXIST extends SystemError {
   }
 }
 
+class ENOTDIR extends SystemError {
+  constructor(syscall: string, path: string) {
+    super('not a directory', {
+      errno: -20,
+      code: 'ENOTDIR',
+      syscall,
+      path,
+    })
+  }
+}
+
+async function getParent(path: string, create = false) {
+  let root = await navigator.storage.getDirectory()
+  const segments = path.split('/').filter(Boolean)
+  const filename = segments.pop()!
+  for (const segment of segments) {
+    try {
+      root = await root.getDirectoryHandle(segment, { create })
+    } catch (e) {
+      if (!(e instanceof DOMException)) throw e
+      if (e.code === DOMException.TYPE_MISMATCH_ERR) {
+        throw new ENOTDIR('lstat', path)
+      } else if (e.code === DOMException.NOT_FOUND_ERR) {
+        throw new ENOENT('lstat', path)
+      }
+      throw e
+    }
+  }
+  return [root, filename] as const
+}
+
 export interface EncodingOptions {
   encoding?: BufferEncoding
 }
 
 export async function writeFile(path: string, data: string | ArrayBuffer | ArrayBufferView | Blob | DataView) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment, { create: true })
-  }
+  const [root, filename] = await getParent(path, true)
   const handle = await root.getFileHandle(filename, { create: true })
   const stream = await handle.createWritable()
   if (typeof data === 'string') {
@@ -83,12 +120,7 @@ export async function writeFile(path: string, data: string | ArrayBuffer | Array
 }
 
 export async function readFile(path: string, options: 'utf8' | 'binary' = 'binary') {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment)
-  }
+  const [root, filename] = await getParent(path, true)
   const handle = await root.getFileHandle(filename)
   const file = await handle.getFile()
   if (options === 'utf8') {
@@ -122,12 +154,7 @@ export interface MakeDirectoryOptions {
 }
 
 export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (let i = 0; i < segments.length; ++i) {
-    root = await root.getDirectoryHandle(segments[i], options.recursive ? { create: true } : {})
-  }
+  const [root, filename] = await getParent(path, options.recursive)
   if (options.recursive) {
     return await root.getDirectoryHandle(filename, { create: true })
   }
@@ -140,30 +167,28 @@ export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
   throw new EEXIST('mkdir', path)
 }
 
-export async function unlink(path: string) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment)
-  }
-  await root.removeEntry(filename, { recursive: true })
+export interface RmOptions {
+  force?: boolean
+  recursive?: boolean
 }
 
-export { unlink as rm }
+export async function rm(path: string, options: RmOptions = {}) {
+  try {
+    const [root, filename] = await getParent(path)
+    await root.removeEntry(filename, { recursive: options.recursive })
+  } catch (err) {
+    if (options.force && err instanceof ENOENT) return
+    throw err
+  }
+}
 
-export interface StatOptions {}
+export { rm as unlink }
 
 export async function getHandle(path: string, kind: 'file'): Promise<FileSystemFileHandle>
 export async function getHandle(path: string, kind: 'directory'): Promise<FileSystemDirectoryHandle>
 export async function getHandle(path: string, kind?: FileSystemHandleKind): Promise<FileSystemHandle>
 export async function getHandle(path: string, kind?: FileSystemHandleKind) {
-  let root = await navigator.storage.getDirectory()
-  const segments = path.split('/').filter(Boolean)
-  const filename = segments.pop()!
-  for (const segment of segments) {
-    root = await root.getDirectoryHandle(segment, { create: !!kind })
-  }
+  const [root, filename] = await getParent(path, !!kind)
   if (kind === 'file') {
     return await root.getFileHandle(filename, { create: true })
   } else if (kind === 'directory') {
@@ -175,6 +200,8 @@ export async function getHandle(path: string, kind?: FileSystemHandleKind) {
     return await root.getDirectoryHandle(filename)
   }
 }
+
+export interface StatOptions {}
 
 export async function stat(path: string, options?: StatOptions) {
   const handle = await getHandle(path)
@@ -201,7 +228,7 @@ export async function rename(oldPath: string, newPath: string) {
       await rename(oldPath + '/' + name, newPath + '/' + name)
     }
   }
-  await unlink(oldPath)
+  await rm(oldPath, { recursive: true })
 }
 
 interface FileHandleWriteResult<T> {
