@@ -167,12 +167,12 @@ export async function mkdir(path: string, options: MakeDirectoryOptions = {}) {
   throw new EEXIST('mkdir', path)
 }
 
-export interface RmOptions {
+export interface RemoveOptions {
   force?: boolean
   recursive?: boolean
 }
 
-export async function rm(path: string, options: RmOptions = {}) {
+export async function rm(path: string, options: RemoveOptions = {}) {
   try {
     const [root, filename] = await getParent(path)
     await root.removeEntry(filename, { recursive: options.recursive })
@@ -182,7 +182,34 @@ export async function rm(path: string, options: RmOptions = {}) {
   }
 }
 
-export { rm as unlink }
+export { rm as unlink, rm as rmdir }
+
+export interface CopyOptions {
+  force?: boolean
+  recursive?: boolean
+}
+
+export async function cp(src: string, dst: string, options: CopyOptions = {}) {
+  const oldHandle = await getHandle(src)
+  const newHandle = await getHandle(dst, oldHandle.kind)
+  if (oldHandle.kind === 'file') {
+    const buffer = await (oldHandle as FileSystemFileHandle).getFile().then(file => file.arrayBuffer())
+    const stream = await (newHandle as FileSystemFileHandle).createWritable()
+    await stream.write(buffer)
+    await stream.close()
+  } else {
+    for await (const name of (oldHandle as FileSystemDirectoryHandle).keys()) {
+      await cp(src + '/' + name, dst + '/' + name)
+    }
+  }
+}
+
+export { cp as copyFile }
+
+export async function rename(oldPath: string, newPath: string) {
+  await cp(oldPath, newPath, { recursive: true })
+  await rm(oldPath, { recursive: true })
+}
 
 export async function getHandle(path: string, kind: 'file'): Promise<FileSystemFileHandle>
 export async function getHandle(path: string, kind: 'directory'): Promise<FileSystemDirectoryHandle>
@@ -213,22 +240,6 @@ export async function stat(path: string, options?: StatOptions) {
 
 export async function access(path: string, mode?: number) {
   await getHandle(path)
-}
-
-export async function rename(oldPath: string, newPath: string) {
-  const oldHandle = await getHandle(oldPath)
-  const newHandle = await getHandle(newPath, oldHandle.kind)
-  if (oldHandle.kind === 'file') {
-    const buffer = await (oldHandle as FileSystemFileHandle).getFile().then(file => file.arrayBuffer())
-    const stream = await (newHandle as FileSystemFileHandle).createWritable()
-    await stream.write(buffer)
-    await stream.close()
-  } else {
-    for await (const name of (oldHandle as FileSystemDirectoryHandle).keys()) {
-      await rename(oldPath + '/' + name, newPath + '/' + name)
-    }
-  }
-  await rm(oldPath, { recursive: true })
 }
 
 interface FileHandleWriteResult<T> {
