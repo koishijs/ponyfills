@@ -1,4 +1,4 @@
-import * as path from 'path'
+import { resolve, sep } from 'path'
 
 export function fileURLToPath(path: string | URL) {
   if (typeof path === 'string') path = new URL(path)
@@ -16,9 +16,9 @@ function encodePathChars(filepath: string) {
 
 export function pathToFileURL(filepath: string) {
   const outURL = new URL('file://')
-  let resolved = path.resolve(filepath)
+  let resolved = resolve(filepath)
   // path.resolve strips trailing slashes so we must add them back
-  if (filepath[filepath.length - 1] === '/' && resolved[resolved.length - 1] !== path.sep) {
+  if (filepath[filepath.length - 1] === '/' && resolved[resolved.length - 1] !== sep) {
     resolved += '/'
   }
   outURL.pathname = encodePathChars(resolved)

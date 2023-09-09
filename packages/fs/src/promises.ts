@@ -155,14 +155,18 @@ export async function appendFile(path: string, data: string | ArrayBuffer | Arra
   await writeOrAppendFile('append', path, data, true)
 }
 
-export async function readFile(path: string, options: 'utf8' | 'binary' = 'binary') {
-  const handle = await getFileHandle('read', path)
+async function _readFile(handle: FileSystemFileHandle, encoding?: BufferEncoding) {
   const file = await handle.getFile()
-  if (options === 'utf8') {
+  if (encoding === 'utf8' || encoding === 'utf-8') {
     return await file.text()
   } else {
     return Buffer.from(await file.arrayBuffer())
   }
+}
+
+export async function readFile(path: string, options?: BufferEncoding) {
+  const handle = await getFileHandle('read', path)
+  return await _readFile(handle, options)
 }
 
 export interface ReadDirectoryOptions {
@@ -297,9 +301,8 @@ class FileHandle {
     })
   }
 
-  async readFile() {
-    const file = await this.handle.getFile()
-    return await file.arrayBuffer()
+  async readFile(encoding?: BufferEncoding) {
+    return _readFile(this.handle, encoding)
   }
 
   write<T extends Uint8Array>(buffer: T, offset?: number, length?: number, position?: number): Promise<FileHandleWriteResult<T>>
